@@ -38,9 +38,9 @@ Envoy mutual-TLS setup, and engineers preparing for "design service-to-service a
 | A workload without a registration entry gets no SVID and no connection | 100% refused | attestation tests; demo scenario 2; kind e2e (intruder, 5 of 5 attempts) |
 | A forged, expired or foreign SVID is refused | 100% refused | CA/verify tests; demo scenarios 3 and 4 |
 | A valid identity that is not an allowed peer is refused, on both sides | 100% refused | demo scenarios 5 and 6; Envoy SAN matchers (render tests) |
-| SVID lifetime | at most 3600 s | spec validation; CA cap; kind e2e reads the SVID from Envoy `/certs` |
+| SVID lifetime | at most 3600 s | spec validation; CA cap; kind e2e reads the SVID expiry the backend's Envoy saw in the handshake |
 | Generated configs match the spec | 0 stale files | `ztmesh check` in tests, CI and `.tmp/check.sh` |
-| Test suite can fail | every hand mutation killed | `docs/quality/2026-11-01.md` (12 of 12) |
+| Test suite can fail | every hand mutation killed | `docs/quality/2026-11-01.md` (14 of 14) |
 
 ## Non-goals (M1)
 
@@ -67,7 +67,8 @@ deploy/mesh.json --ztmesh render--> deploy/generated/
   bundle (`spiffe://<td>`) from the SPIRE agent's SDS API on `/run/spire/sockets/agent.sock`.
   Inbound listeners require a client certificate and accept only the SPIFFE IDs listed in
   `allowed_callers`; outbound clusters accept only the upstream's SPIFFE ID. TLS 1.3 minimum.
-  The app talks plain HTTP to its sidecar on 127.0.0.1 only.
+  The app talks plain HTTP to its sidecar on 127.0.0.1 only. Envoy's admin API is not on the pod
+  network: it listens on a Unix socket in a volume that only the envoy container mounts.
 - **Local reference model.** `attestation.py` reproduces SPIRE's matching rule (all entry
   selectors must be discovered, under the right parent); `ca.py` issues SVIDs as the SPIRE server
   CA does; `verify.py` runs RFC 5280 path validation (`cryptography`) plus the X509-SVID rules
@@ -85,7 +86,7 @@ deploy/mesh.json --ztmesh render--> deploy/generated/
 
 ## Measurement plan
 
-- Local: `pytest` (91 tests), `ztmesh check`, `ztmesh demo` with its JSON-lines decision log,
+- Local: `pytest` (95 tests, 1 POSIX-only), `ztmesh check`, `ztmesh demo` with its JSON-lines decision log,
   hand mutations of the core checks.
 - CI: `envoy --mode validate` on every generated bootstrap; a kind cluster runs SPIRE and the
   sidecars and checks: frontend reaches backend with both IDs seen, the SVID in Envoy expires

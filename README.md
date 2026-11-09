@@ -16,7 +16,7 @@ list, and a server presenting the wrong identity):
 
 ![ztmesh demo: one allowed and five refused mTLS connections](docs/proof/demo.jpg)
 
-91 tests pass locally, the generated SPIRE, Envoy and Kubernetes files match the spec, and the
+94 tests pass locally (1 POSIX-only test is skipped on Windows), the generated SPIRE, Envoy and Kubernetes files match the spec, and the
 dependency audit is clean:
 
 ![pytest, ztmesh check and pip-audit output](docs/proof/tests.jpg)
@@ -103,7 +103,7 @@ Language: **Python** (3.11+). Code in [`src/zero_trust_service_mesh/`](src/zero_
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 make setup     # install the package and dev tools
 make lint      # ruff, ruff format, mypy --strict
-make test      # 91 tests
+make test      # 95 tests (94 run on Windows; 1 is POSIX-only)
 make check     # generated configs match deploy/mesh.json
 make demo      # one allowed and five refused mTLS connections; decision log in .tmp/
 make audit     # pip-audit
@@ -131,15 +131,15 @@ and the mutation table are in [docs/quality/2026-11-01.md](docs/quality/2026-11-
 | `test_attestation.py` | 8 | SPIRE matching: only a registered namespace + service account under the right agent gets an ID |
 | `test_ca_verify.py` | 9 | 1 h SVIDs that never outlive the CA; expired, not-yet-valid, rogue-CA, foreign and malformed SVIDs rejected |
 | `test_mtls.py` | 5 | Real TLS 1.3 on 127.0.0.1: both IDs proven; no client certificate refused; all six demo scenarios as expected |
-| `test_render.py` | 13 | Client certificates required, exact SPIFFE ID matchers, SDS on the agent socket, images by digest, limits, no tokens, least-privilege RBAC, committed files current |
-| `test_cli.py` | 5 | Exit codes, decision log (12 JSON records, UTC), atomic writes |
+| `test_render.py` | 15 | Client certificates required, Envoy admin only on a Unix socket the app container cannot see, exact SPIFFE ID matchers, SDS on the agent socket, images by digest, limits, no tokens, least-privilege RBAC, committed files current |
+| `test_cli.py` | 7 | Exit codes, decision log (12 JSON records, UTC), atomic writes with unpredictable temp names (no planted file or symlink is reused) and the requested mode |
 | `test_smoke.py` | 1 | Package version |
 
 | Check | Result |
 |---|---|
-| Tests (`make test`) | **91 passed**, 0 failed, 0 skipped |
+| Tests (`make test`) | **94 passed**, 0 failed, 1 skipped on Windows (POSIX symlink and mode test, runs in CI) |
 | Demo | 6 of 6 scenarios as expected: 1 allowed, 5 refused |
-| Mutation testing | 12 of 12 hand mutations killed |
+| Mutation testing | 14 of 14 hand mutations killed |
 | Lint / types / audit | ruff and mypy `--strict` clean; `pip-audit`: no known vulnerabilities |
 | CI only (not run yet) | `envoy --mode validate` of the 3 bootstraps; kind e2e with real SPIRE and Envoy |
 
@@ -193,7 +193,8 @@ the cluster test runs only in a disposable kind cluster in CI. No real secrets a
 - Every GitHub Action is pinned to a commit SHA and every container image by digest; workflows
   run read-only, without persisted credentials.
 - Containers run with limits, a read-only root filesystem and no privilege escalation; workload
-  pods get no service account token; the SPIRE server runs as uid 1000 and may update only the
+  pods get no service account token; the Envoy admin API listens only on a Unix socket in a
+  volume the app container does not mount; the SPIRE server runs as uid 1000 and may update only the
   `spire-bundle` ConfigMap.
 - Dependabot update pull requests are paused (`open-pull-requests-limit: 0`) so the repository
   keeps a single `main` branch; dependencies are updated by hand and checked by the CI audit.

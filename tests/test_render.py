@@ -6,7 +6,13 @@ from typing import Any
 
 import pytest
 
-from zero_trust_service_mesh.envoy import AGENT_SOCKET, bootstrap, tls_context
+from zero_trust_service_mesh.envoy import (
+    ADMIN_DIR,
+    ADMIN_SOCKET,
+    AGENT_SOCKET,
+    bootstrap,
+    tls_context,
+)
 from zero_trust_service_mesh.k8s import IMAGES, spire_manifests, workload_manifests
 from zero_trust_service_mesh.mesh import load_spec
 from zero_trust_service_mesh.render import render, stale_files, write_all
@@ -75,7 +81,30 @@ def test_frontend_outbound_is_local_only_and_verifies_the_backend_id() -> None:
         "match_typed_subject_alt_names"
     ]
     assert [s["matcher"]["exact"] for s in sans] == ["spiffe://mesh.example/ns/demo/sa/backend"]
-    assert cfg["admin"]["address"]["socket_address"]["address"] == "127.0.0.1"
+
+
+def test_envoy_admin_is_a_unix_socket_only_the_envoy_container_mounts() -> None:
+    doc = workload_manifests(SPEC)
+    for w in SPEC.workloads:
+        admin = bootstrap(SPEC, w)["admin"]["address"]
+        assert "socket_address" not in admin, (
+            "admin must not listen on TCP (the app shares the pod network)"
+        )
+        assert admin["pipe"] == {"path": ADMIN_SOCKET, "mode": 0o600}
+        dep = next(
+            i for i in doc["items"] if i["kind"] == "Deployment" and i["metadata"]["name"] == w.name
+        )
+        for c in dep["spec"]["template"]["spec"]["containers"]:
+            mounts = {m["mountPath"] for m in c.get("volumeMounts", [])}
+            assert (ADMIN_DIR in mounts) == (c["name"] == "envoy"), c["name"]
+
+
+def test_backend_reports_the_peer_certificate_expiry_for_the_kind_check() -> None:
+    [listener] = bootstrap(SPEC, SPEC.get("backend"))["static_resources"]["listeners"]
+    hcm = listener["filter_chains"][0]["filters"][0]["typed_config"]
+    route = hcm["route_config"]["virtual_hosts"][0]["routes"][0]
+    headers = {h["header"]["key"]: h["header"]["value"] for h in route["response_headers_to_add"]}
+    assert headers["x-peer-cert-not-after"] == "%DOWNSTREAM_PEER_CERT_V_END%"
 
 
 def test_every_tls_context_and_sds_points_at_the_spire_agent_socket() -> None:

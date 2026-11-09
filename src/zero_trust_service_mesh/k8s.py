@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .envoy import bootstrap
+from .envoy import ADMIN_DIR, bootstrap
 from .mesh import MeshSpec, Workload
 from .spire import HEALTH_PORT, SERVER_PORT, agent_conf, server_conf
 
@@ -307,6 +307,7 @@ def _deployment(spec: MeshSpec, w: Workload) -> dict[str, Any]:
             "securityContext": _hardened(101),
             "volumeMounts": [
                 {"name": "envoy", "mountPath": "/etc/envoy", "readOnly": True},
+                {"name": "envoy-admin", "mountPath": ADMIN_DIR},
                 {"name": "spire-sockets", "mountPath": SOCKET_DIR, "readOnly": True},
             ],
         }
@@ -328,6 +329,7 @@ def _deployment(spec: MeshSpec, w: Workload) -> dict[str, Any]:
         "containers": containers,
         "volumes": [
             {"name": "envoy", "configMap": {"name": f"envoy-{w.name}"}},
+            {"name": "envoy-admin", "emptyDir": {"medium": "Memory", "sizeLimit": "1Mi"}},
             {"name": "spire-sockets", "hostPath": {"path": SOCKET_DIR, "type": "Directory"}},
         ],
     }

@@ -1,9 +1,9 @@
 {
   "admin": {
     "address": {
-      "socket_address": {
-        "address": "127.0.0.1",
-        "port_value": 9901
+      "pipe": {
+        "mode": 384,
+        "path": "/var/run/envoy-admin/admin.sock"
       }
     }
   },
@@ -99,6 +99,12 @@
                                 "header": {
                                   "key": "x-local-spiffe-id",
                                   "value": "%DOWNSTREAM_LOCAL_URI_SAN%"
+                                }
+                              },
+                              {
+                                "header": {
+                                  "key": "x-peer-cert-not-after",
+                                  "value": "%DOWNSTREAM_PEER_CERT_V_END%"
                                 }
                               }
                             ]

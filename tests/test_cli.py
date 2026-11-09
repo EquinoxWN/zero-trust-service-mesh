@@ -1,6 +1,8 @@
 """The ztmesh command: exit codes, decision log and argument errors."""
 
 import json
+import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -55,3 +57,26 @@ def test_write_atomic_cleans_up_when_the_rename_fails(tmp_path: Path) -> None:
     with pytest.raises(OSError):  # noqa: PT011 - the error differs by OS (IsADirectory, PermissionError)
         write_atomic(target, b"data")
     assert sorted(p.name for p in tmp_path.iterdir()) == ["dir"]
+
+
+def test_write_atomic_never_reuses_a_predictable_temp_name(tmp_path: Path) -> None:
+    target = tmp_path / "f.key"
+    planted = tmp_path / f".{target.name}.{os.getpid()}.tmp"
+    planted.write_bytes(b"planted")
+    write_atomic(target, b"secret", mode=0o600)
+    assert target.read_bytes() == b"secret"
+    assert planted.read_bytes() == b"planted"
+    assert sorted(p.name for p in tmp_path.iterdir()) == sorted([target.name, planted.name])
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits and unprivileged symlinks")
+def test_write_atomic_applies_the_mode_and_does_not_follow_symlinks(tmp_path: Path) -> None:
+    victim = tmp_path / "victim"
+    victim.write_bytes(b"untouched")
+    target = tmp_path / "f.key"
+    (tmp_path / f".{target.name}.{os.getpid()}.tmp").symlink_to(victim)
+    write_atomic(target, b"secret", mode=0o600)
+    assert victim.read_bytes() == b"untouched"
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+    write_atomic(target, b"public", mode=0o644)
+    assert stat.S_IMODE(target.stat().st_mode) == 0o644

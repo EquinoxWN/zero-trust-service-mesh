@@ -24,7 +24,7 @@ Both layers read the same spec, and the configs for the cluster are generated fr
 ## Consequences
 
 - Edge cases (dot segments, several URI SANs, CA leaves, expiry, rogue CAs) are tested quickly
-  and deterministically; 12 of 12 hand mutations are killed locally.
+  and deterministically; 14 of 14 hand mutations are killed locally.
 - The model can drift from SPIRE. The kind job is the check, and the README says which claims
   are verified only there.
 - Two code paths to maintain: the model is kept small (about 700 lines in five modules) for that reason.

@@ -45,20 +45,17 @@ local_id=$(grep -i '^x-local-spiffe-id:' <<<"$out" | tr -d '\r' | awk '{print $2
 [ "$local_id" = "$BACK" ] || fail "backend presented '$local_id', want $BACK"
 echo "::notice title=mTLS allowed::frontend -> backend 200; backend saw $peer and presented $local_id"
 
-echo "== frontend SVID as loaded by Envoy"
-certs=$(k -n "$NS" exec deploy/frontend -c app -- curl -s --max-time 5 http://127.0.0.1:9901/certs)
-ttl=$(printf '%s' "$certs" | python3 -c '
-import datetime as dt, json, sys
-for c in json.load(sys.stdin)["certificates"]:
-    for cc in c.get("cert_chain", []):
-        if sys.argv[1] in [s.get("uri") for s in cc.get("subject_alt_names", [])]:
-            exp = dt.datetime.fromisoformat(cc["expiration_time"].replace("Z", "+00:00"))
-            print(int((exp - dt.datetime.now(dt.timezone.utc)).total_seconds()))
-            raise SystemExit
-raise SystemExit("frontend SVID not found in Envoy /certs")
-' "$FRONT")
+echo "== lifetime of the frontend SVID, as seen by the backend's Envoy in the handshake"
+# Envoy admin is on a Unix socket only the envoy container mounts, so the expiry comes from the
+# peer certificate the backend received (x-peer-cert-not-after), not from the admin API.
+not_after=$(grep -i '^x-peer-cert-not-after:' <<<"$out" | tr -d '\r' | awk '{print $2}')
+ttl=$(python3 -c '
+import datetime as dt, sys
+exp = dt.datetime.fromisoformat(sys.argv[1].replace("Z", "+00:00"))
+print(int((exp - dt.datetime.now(dt.timezone.utc)).total_seconds()))
+' "$not_after") || fail "could not parse x-peer-cert-not-after '$not_after'"
 [ "$ttl" -gt 0 ] && [ "$ttl" -le 3600 ] || fail "frontend SVID lifetime left $ttl s, want (0, 3600]"
-echo "::notice title=Short-lived SVID::frontend SVID expires in ${ttl} s (at most 3600)"
+echo "::notice title=Short-lived SVID::frontend SVID expires in ${ttl} s (at most 3600), read from the mTLS handshake"
 
 echo "== intruder (no registration entry) through its sidecar"
 for _ in 1 2 3 4 5; do
@@ -74,6 +71,15 @@ if k -n "$NS" exec deploy/intruder -c app -- curl -sk --max-time 5 -o /dev/null 
   fail "backend accepted a TLS connection without a client certificate"
 fi
 echo "::notice title=No client certificate refused::backend refused TLS without a client certificate"
+
+echo "== app container cannot reach the Envoy admin API"
+if k -n "$NS" exec deploy/frontend -c app -- curl -s --max-time 5 -o /dev/null http://127.0.0.1:9901/; then
+  fail "Envoy admin answered on 127.0.0.1:9901"
+fi
+if k -n "$NS" exec deploy/frontend -c app -- sh -c 'ls /var/run/envoy-admin' >/dev/null 2>&1; then
+  fail "app container can see the Envoy admin socket directory"
+fi
+echo "::notice title=Admin not exposed::app container reaches no Envoy admin port or socket"
 
 echo "== intruder bypassing its sidecar: plain HTTP"
 if k -n "$NS" exec deploy/intruder -c app -- curl -s --max-time 5 -o /dev/null "http://backend.$NS.svc.cluster.local:8443/"; then

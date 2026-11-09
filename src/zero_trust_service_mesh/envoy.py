@@ -7,7 +7,8 @@ from typing import Any
 from .mesh import MeshSpec, Workload
 
 AGENT_SOCKET = "/run/spire/sockets/agent.sock"
-ADMIN_PORT = 9901
+ADMIN_DIR = "/var/run/envoy-admin"
+ADMIN_SOCKET = f"{ADMIN_DIR}/admin.sock"
 SPIRE_CLUSTER = "spire_agent"
 T = "type.googleapis.com/envoy."
 
@@ -106,6 +107,7 @@ def inbound_listener(spec: MeshSpec, w: Workload) -> dict[str, Any]:
         "response_headers_to_add": [
             {"header": {"key": "x-peer-spiffe-id", "value": "%DOWNSTREAM_PEER_URI_SAN%"}},
             {"header": {"key": "x-local-spiffe-id", "value": "%DOWNSTREAM_LOCAL_URI_SAN%"}},
+            {"header": {"key": "x-peer-cert-not-after", "value": "%DOWNSTREAM_PEER_CERT_V_END%"}},
         ],
     }
     return {
@@ -171,6 +173,8 @@ def bootstrap(spec: MeshSpec, w: Workload) -> dict[str, Any]:
         clusters.append(clu)
     return {
         "node": {"id": w.name, "cluster": w.name},
-        "admin": {"address": _addr("127.0.0.1", ADMIN_PORT)},
+        # Admin on a Unix socket in a volume only the envoy container mounts: the app container
+        # shares the pod network and could otherwise reach the unauthenticated admin API.
+        "admin": {"address": {"pipe": {"path": ADMIN_SOCKET, "mode": 0o600}}},
         "static_resources": {"listeners": listeners, "clusters": clusters},
     }
