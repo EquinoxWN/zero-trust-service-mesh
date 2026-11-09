@@ -1,0 +1,454 @@
+{
+  "apiVersion": "v1",
+  "items": [
+    {
+      "apiVersion": "v1",
+      "kind": "Namespace",
+      "metadata": {
+        "name": "demo"
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "automountServiceAccountToken": false,
+      "kind": "ServiceAccount",
+      "metadata": {
+        "name": "backend",
+        "namespace": "demo"
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "data": {
+        "envoy.json": "{\n  \"admin\": {\n    \"address\": {\n      \"socket_address\": {\n        \"address\": \"127.0.0.1\",\n        \"port_value\": 9901\n      }\n    }\n  },\n  \"node\": {\n    \"cluster\": \"backend\",\n    \"id\": \"backend\"\n  },\n  \"static_resources\": {\n    \"clusters\": [\n      {\n        \"connect_timeout\": \"1s\",\n        \"load_assignment\": {\n          \"cluster_name\": \"spire_agent\",\n          \"endpoints\": [\n            {\n              \"lb_endpoints\": [\n                {\n                  \"endpoint\": {\n                    \"address\": {\n                      \"pipe\": {\n                        \"path\": \"/run/spire/sockets/agent.sock\"\n                      }\n                    }\n                  }\n                }\n              ]\n            }\n          ]\n        },\n        \"name\": \"spire_agent\",\n        \"type\": \"STATIC\",\n        \"typed_extension_protocol_options\": {\n          \"envoy.extensions.upstreams.http.v3.HttpProtocolOptions\": {\n            \"@type\": \"type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions\",\n            \"explicit_http_config\": {\n              \"http2_protocol_options\": {}\n            }\n          }\n        }\n      }\n    ],\n    \"listeners\": [\n      {\n        \"address\": {\n          \"socket_address\": {\n            \"address\": \"0.0.0.0\",\n            \"port_value\": 8443\n          }\n        },\n        \"filter_chains\": [\n          {\n            \"filters\": [\n              {\n                \"name\": \"envoy.filters.network.http_connection_manager\",\n                \"typed_config\": {\n                  \"@type\": \"type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager\",\n                  \"http_filters\": [\n                    {\n                      \"name\": \"envoy.filters.http.router\",\n                      \"typed_config\": {\n                        \"@type\": \"type.googleapis.com/envoy.extensions.filters.http.router.v3.Router\"\n                      }\n                    }\n                  ],\n                  \"request_timeout\": \"10s\",\n                  \"route_config\": {\n                    \"name\": \"inbound_backend\",\n                    \"virtual_hosts\": [\n                      {\n                        \"domains\": [\n                          \"*\"\n                        ],\n                        \"name\": \"inbound_backend\",\n                        \"routes\": [\n                          {\n                            \"direct_response\": {\n                              \"body\": {\n                                \"inline_string\": \"hello from backend\\n\"\n                              },\n                              \"status\": 200\n                            },\n                            \"match\": {\n                              \"prefix\": \"/\"\n                            },\n                            \"response_headers_to_add\": [\n                              {\n                                \"header\": {\n                                  \"key\": \"x-peer-spiffe-id\",\n                                  \"value\": \"%DOWNSTREAM_PEER_URI_SAN%\"\n                                }\n                              },\n                              {\n                                \"header\": {\n                                  \"key\": \"x-local-spiffe-id\",\n                                  \"value\": \"%DOWNSTREAM_LOCAL_URI_SAN%\"\n                                }\n                              }\n                            ]\n                          }\n                        ]\n                      }\n                    ]\n                  },\n                  \"stat_prefix\": \"inbound_backend\"\n                }\n              }\n            ],\n            \"transport_socket\": {\n              \"name\": \"envoy.transport_sockets.tls\",\n              \"typed_config\": {\n                \"@type\": \"type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext\",\n                \"common_tls_context\": {\n                  \"combined_validation_context\": {\n                    \"default_validation_context\": {\n                      \"match_typed_subject_alt_names\": [\n                        {\n                          \"matcher\": {\n                            \"exact\": \"spiffe://mesh.example/ns/demo/sa/frontend\"\n                          },\n                          \"san_type\": \"URI\"\n                        }\n                      ]\n                    },\n                    \"validation_context_sds_secret_config\": {\n                      \"name\": \"spiffe://mesh.example\",\n                      \"sds_config\": {\n                        \"api_config_source\": {\n                          \"api_type\": \"GRPC\",\n                          \"grpc_services\": [\n                            {\n                              \"envoy_grpc\": {\n                                \"cluster_name\": \"spire_agent\"\n                              }\n                            }\n                          ],\n                          \"transport_api_version\": \"V3\"\n                        },\n                        \"resource_api_version\": \"V3\"\n                      }\n                    }\n                  },\n                  \"tls_certificate_sds_secret_configs\": [\n                    {\n                      \"name\": \"spiffe://mesh.example/ns/demo/sa/backend\",\n                      \"sds_config\": {\n                        \"api_config_source\": {\n                          \"api_type\": \"GRPC\",\n                          \"grpc_services\": [\n                            {\n                              \"envoy_grpc\": {\n                                \"cluster_name\": \"spire_agent\"\n                              }\n                            }\n                          ],\n                          \"transport_api_version\": \"V3\"\n                        },\n                        \"resource_api_version\": \"V3\"\n                      }\n                    }\n                  ],\n                  \"tls_params\": {\n                    \"tls_minimum_protocol_version\": \"TLSv1_3\"\n                  }\n                },\n                \"require_client_certificate\": true\n              }\n            }\n          }\n        ],\n        \"name\": \"inbound_backend\"\n      }\n    ]\n  }\n}\n"
+      },
+      "kind": "ConfigMap",
+      "metadata": {
+        "name": "envoy-backend",
+        "namespace": "demo"
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Service",
+      "metadata": {
+        "name": "backend",
+        "namespace": "demo"
+      },
+      "spec": {
+        "ports": [
+          {
+            "name": "mtls",
+            "port": 8443,
+            "protocol": "TCP",
+            "targetPort": 8443
+          }
+        ],
+        "selector": {
+          "app": "backend"
+        },
+        "type": "ClusterIP"
+      }
+    },
+    {
+      "apiVersion": "apps/v1",
+      "kind": "Deployment",
+      "metadata": {
+        "labels": {
+          "app": "backend"
+        },
+        "name": "backend",
+        "namespace": "demo"
+      },
+      "spec": {
+        "replicas": 1,
+        "selector": {
+          "matchLabels": {
+            "app": "backend"
+          }
+        },
+        "template": {
+          "metadata": {
+            "labels": {
+              "app": "backend"
+            }
+          },
+          "spec": {
+            "automountServiceAccountToken": false,
+            "containers": [
+              {
+                "args": [
+                  "-c",
+                  "/etc/envoy/envoy.json",
+                  "--log-level",
+                  "info"
+                ],
+                "image": "docker.io/envoyproxy/envoy:v1.39.5@sha256:8fc594a5d85eb76dca24155cfb9208882406873932b20cf33649a0a611194c43",
+                "name": "envoy",
+                "ports": [
+                  {
+                    "containerPort": 8443,
+                    "name": "mtls"
+                  }
+                ],
+                "resources": {
+                  "limits": {
+                    "cpu": "500m",
+                    "memory": "128Mi"
+                  },
+                  "requests": {
+                    "cpu": "25m",
+                    "memory": "32Mi"
+                  }
+                },
+                "securityContext": {
+                  "allowPrivilegeEscalation": false,
+                  "capabilities": {
+                    "drop": [
+                      "ALL"
+                    ]
+                  },
+                  "readOnlyRootFilesystem": true,
+                  "runAsGroup": 101,
+                  "runAsNonRoot": true,
+                  "runAsUser": 101
+                },
+                "volumeMounts": [
+                  {
+                    "mountPath": "/etc/envoy",
+                    "name": "envoy",
+                    "readOnly": true
+                  },
+                  {
+                    "mountPath": "/run/spire/sockets",
+                    "name": "spire-sockets",
+                    "readOnly": true
+                  }
+                ]
+              }
+            ],
+            "securityContext": {
+              "runAsNonRoot": true,
+              "seccompProfile": {
+                "type": "RuntimeDefault"
+              }
+            },
+            "serviceAccountName": "backend",
+            "volumes": [
+              {
+                "configMap": {
+                  "name": "envoy-backend"
+                },
+                "name": "envoy"
+              },
+              {
+                "hostPath": {
+                  "path": "/run/spire/sockets",
+                  "type": "Directory"
+                },
+                "name": "spire-sockets"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "automountServiceAccountToken": false,
+      "kind": "ServiceAccount",
+      "metadata": {
+        "name": "frontend",
+        "namespace": "demo"
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "data": {
+        "envoy.json": "{\n  \"admin\": {\n    \"address\": {\n      \"socket_address\": {\n        \"address\": \"127.0.0.1\",\n        \"port_value\": 9901\n      }\n    }\n  },\n  \"node\": {\n    \"cluster\": \"frontend\",\n    \"id\": \"frontend\"\n  },\n  \"static_resources\": {\n    \"clusters\": [\n      {\n        \"connect_timeout\": \"1s\",\n        \"load_assignment\": {\n          \"cluster_name\": \"spire_agent\",\n          \"endpoints\": [\n            {\n              \"lb_endpoints\": [\n                {\n                  \"endpoint\": {\n                    \"address\": {\n                      \"pipe\": {\n                        \"path\": \"/run/spire/sockets/agent.sock\"\n                      }\n                    }\n                  }\n                }\n              ]\n            }\n          ]\n        },\n        \"name\": \"spire_agent\",\n        \"type\": \"STATIC\",\n        \"typed_extension_protocol_options\": {\n          \"envoy.extensions.upstreams.http.v3.HttpProtocolOptions\": {\n            \"@type\": \"type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions\",\n            \"explicit_http_config\": {\n              \"http2_protocol_options\": {}\n            }\n          }\n        }\n      },\n      {\n        \"connect_timeout\": \"2s\",\n        \"load_assignment\": {\n          \"cluster_name\": \"outbound_backend\",\n          \"endpoints\": [\n            {\n              \"lb_endpoints\": [\n                {\n                  \"endpoint\": {\n                    \"address\": {\n                      \"socket_address\": {\n                        \"address\": \"backend.demo.svc.cluster.local\",\n                        \"port_value\": 8443\n                      }\n                    }\n                  }\n                }\n              ]\n            }\n          ]\n        },\n        \"name\": \"outbound_backend\",\n        \"transport_socket\": {\n          \"name\": \"envoy.transport_sockets.tls\",\n          \"typed_config\": {\n            \"@type\": \"type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext\",\n            \"common_tls_context\": {\n              \"combined_validation_context\": {\n                \"default_validation_context\": {\n                  \"match_typed_subject_alt_names\": [\n                    {\n                      \"matcher\": {\n                        \"exact\": \"spiffe://mesh.example/ns/demo/sa/backend\"\n                      },\n                      \"san_type\": \"URI\"\n                    }\n                  ]\n                },\n                \"validation_context_sds_secret_config\": {\n                  \"name\": \"spiffe://mesh.example\",\n                  \"sds_config\": {\n                    \"api_config_source\": {\n                      \"api_type\": \"GRPC\",\n                      \"grpc_services\": [\n                        {\n                          \"envoy_grpc\": {\n                            \"cluster_name\": \"spire_agent\"\n                          }\n                        }\n                      ],\n                      \"transport_api_version\": \"V3\"\n                    },\n                    \"resource_api_version\": \"V3\"\n                  }\n                }\n              },\n              \"tls_certificate_sds_secret_configs\": [\n                {\n                  \"name\": \"spiffe://mesh.example/ns/demo/sa/frontend\",\n                  \"sds_config\": {\n                    \"api_config_source\": {\n                      \"api_type\": \"GRPC\",\n                      \"grpc_services\": [\n                        {\n                          \"envoy_grpc\": {\n                            \"cluster_name\": \"spire_agent\"\n                          }\n                        }\n                      ],\n                      \"transport_api_version\": \"V3\"\n                    },\n                    \"resource_api_version\": \"V3\"\n                  }\n                }\n              ],\n              \"tls_params\": {\n                \"tls_minimum_protocol_version\": \"TLSv1_3\"\n              }\n            }\n          }\n        },\n        \"type\": \"STRICT_DNS\"\n      }\n    ],\n    \"listeners\": [\n      {\n        \"address\": {\n          \"socket_address\": {\n            \"address\": \"127.0.0.1\",\n            \"port_value\": 18443\n          }\n        },\n        \"filter_chains\": [\n          {\n            \"filters\": [\n              {\n                \"name\": \"envoy.filters.network.http_connection_manager\",\n                \"typed_config\": {\n                  \"@type\": \"type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager\",\n                  \"http_filters\": [\n                    {\n                      \"name\": \"envoy.filters.http.router\",\n                      \"typed_config\": {\n                        \"@type\": \"type.googleapis.com/envoy.extensions.filters.http.router.v3.Router\"\n                      }\n                    }\n                  ],\n                  \"request_timeout\": \"10s\",\n                  \"route_config\": {\n                    \"name\": \"outbound_backend\",\n                    \"virtual_hosts\": [\n                      {\n                        \"domains\": [\n                          \"*\"\n                        ],\n                        \"name\": \"outbound_backend\",\n                        \"routes\": [\n                          {\n                            \"match\": {\n                              \"prefix\": \"/\"\n                            },\n                            \"route\": {\n                              \"cluster\": \"outbound_backend\",\n                              \"timeout\": \"5s\"\n                            }\n                          }\n                        ]\n                      }\n                    ]\n                  },\n                  \"stat_prefix\": \"outbound_backend\"\n                }\n              }\n            ]\n          }\n        ],\n        \"name\": \"outbound_backend\"\n      }\n    ]\n  }\n}\n"
+      },
+      "kind": "ConfigMap",
+      "metadata": {
+        "name": "envoy-frontend",
+        "namespace": "demo"
+      }
+    },
+    {
+      "apiVersion": "apps/v1",
+      "kind": "Deployment",
+      "metadata": {
+        "labels": {
+          "app": "frontend"
+        },
+        "name": "frontend",
+        "namespace": "demo"
+      },
+      "spec": {
+        "replicas": 1,
+        "selector": {
+          "matchLabels": {
+            "app": "frontend"
+          }
+        },
+        "template": {
+          "metadata": {
+            "labels": {
+              "app": "frontend"
+            }
+          },
+          "spec": {
+            "automountServiceAccountToken": false,
+            "containers": [
+              {
+                "args": [
+                  "-c",
+                  "/etc/envoy/envoy.json",
+                  "--log-level",
+                  "info"
+                ],
+                "image": "docker.io/envoyproxy/envoy:v1.39.5@sha256:8fc594a5d85eb76dca24155cfb9208882406873932b20cf33649a0a611194c43",
+                "name": "envoy",
+                "ports": [],
+                "resources": {
+                  "limits": {
+                    "cpu": "500m",
+                    "memory": "128Mi"
+                  },
+                  "requests": {
+                    "cpu": "25m",
+                    "memory": "32Mi"
+                  }
+                },
+                "securityContext": {
+                  "allowPrivilegeEscalation": false,
+                  "capabilities": {
+                    "drop": [
+                      "ALL"
+                    ]
+                  },
+                  "readOnlyRootFilesystem": true,
+                  "runAsGroup": 101,
+                  "runAsNonRoot": true,
+                  "runAsUser": 101
+                },
+                "volumeMounts": [
+                  {
+                    "mountPath": "/etc/envoy",
+                    "name": "envoy",
+                    "readOnly": true
+                  },
+                  {
+                    "mountPath": "/run/spire/sockets",
+                    "name": "spire-sockets",
+                    "readOnly": true
+                  }
+                ]
+              },
+              {
+                "command": [
+                  "sleep",
+                  "infinity"
+                ],
+                "image": "docker.io/curlimages/curl:8.22.0@sha256:58adaa4e8dca9c988bae2aba4ab3434a0bb2da16bbe3f92dec39ec7785166777",
+                "name": "app",
+                "resources": {
+                  "limits": {
+                    "cpu": "100m",
+                    "memory": "64Mi"
+                  },
+                  "requests": {
+                    "cpu": "25m",
+                    "memory": "32Mi"
+                  }
+                },
+                "securityContext": {
+                  "allowPrivilegeEscalation": false,
+                  "capabilities": {
+                    "drop": [
+                      "ALL"
+                    ]
+                  },
+                  "readOnlyRootFilesystem": true,
+                  "runAsGroup": 100,
+                  "runAsNonRoot": true,
+                  "runAsUser": 100
+                }
+              }
+            ],
+            "securityContext": {
+              "runAsNonRoot": true,
+              "seccompProfile": {
+                "type": "RuntimeDefault"
+              }
+            },
+            "serviceAccountName": "frontend",
+            "volumes": [
+              {
+                "configMap": {
+                  "name": "envoy-frontend"
+                },
+                "name": "envoy"
+              },
+              {
+                "hostPath": {
+                  "path": "/run/spire/sockets",
+                  "type": "Directory"
+                },
+                "name": "spire-sockets"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "automountServiceAccountToken": false,
+      "kind": "ServiceAccount",
+      "metadata": {
+        "name": "intruder",
+        "namespace": "demo"
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "data": {
+        "envoy.json": "{\n  \"admin\": {\n    \"address\": {\n      \"socket_address\": {\n        \"address\": \"127.0.0.1\",\n        \"port_value\": 9901\n      }\n    }\n  },\n  \"node\": {\n    \"cluster\": \"intruder\",\n    \"id\": \"intruder\"\n  },\n  \"static_resources\": {\n    \"clusters\": [\n      {\n        \"connect_timeout\": \"1s\",\n        \"load_assignment\": {\n          \"cluster_name\": \"spire_agent\",\n          \"endpoints\": [\n            {\n              \"lb_endpoints\": [\n                {\n                  \"endpoint\": {\n                    \"address\": {\n                      \"pipe\": {\n                        \"path\": \"/run/spire/sockets/agent.sock\"\n                      }\n                    }\n                  }\n                }\n              ]\n            }\n          ]\n        },\n        \"name\": \"spire_agent\",\n        \"type\": \"STATIC\",\n        \"typed_extension_protocol_options\": {\n          \"envoy.extensions.upstreams.http.v3.HttpProtocolOptions\": {\n            \"@type\": \"type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions\",\n            \"explicit_http_config\": {\n              \"http2_protocol_options\": {}\n            }\n          }\n        }\n      },\n      {\n        \"connect_timeout\": \"2s\",\n        \"load_assignment\": {\n          \"cluster_name\": \"outbound_backend\",\n          \"endpoints\": [\n            {\n              \"lb_endpoints\": [\n                {\n                  \"endpoint\": {\n                    \"address\": {\n                      \"socket_address\": {\n                        \"address\": \"backend.demo.svc.cluster.local\",\n                        \"port_value\": 8443\n                      }\n                    }\n                  }\n                }\n              ]\n            }\n          ]\n        },\n        \"name\": \"outbound_backend\",\n        \"transport_socket\": {\n          \"name\": \"envoy.transport_sockets.tls\",\n          \"typed_config\": {\n            \"@type\": \"type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext\",\n            \"common_tls_context\": {\n              \"combined_validation_context\": {\n                \"default_validation_context\": {\n                  \"match_typed_subject_alt_names\": [\n                    {\n                      \"matcher\": {\n                        \"exact\": \"spiffe://mesh.example/ns/demo/sa/backend\"\n                      },\n                      \"san_type\": \"URI\"\n                    }\n                  ]\n                },\n                \"validation_context_sds_secret_config\": {\n                  \"name\": \"spiffe://mesh.example\",\n                  \"sds_config\": {\n                    \"api_config_source\": {\n                      \"api_type\": \"GRPC\",\n                      \"grpc_services\": [\n                        {\n                          \"envoy_grpc\": {\n                            \"cluster_name\": \"spire_agent\"\n                          }\n                        }\n                      ],\n                      \"transport_api_version\": \"V3\"\n                    },\n                    \"resource_api_version\": \"V3\"\n                  }\n                }\n              },\n              \"tls_certificate_sds_secret_configs\": [\n                {\n                  \"name\": \"spiffe://mesh.example/ns/demo/sa/intruder\",\n                  \"sds_config\": {\n                    \"api_config_source\": {\n                      \"api_type\": \"GRPC\",\n                      \"grpc_services\": [\n                        {\n                          \"envoy_grpc\": {\n                            \"cluster_name\": \"spire_agent\"\n                          }\n                        }\n                      ],\n                      \"transport_api_version\": \"V3\"\n                    },\n                    \"resource_api_version\": \"V3\"\n                  }\n                }\n              ],\n              \"tls_params\": {\n                \"tls_minimum_protocol_version\": \"TLSv1_3\"\n              }\n            }\n          }\n        },\n        \"type\": \"STRICT_DNS\"\n      }\n    ],\n    \"listeners\": [\n      {\n        \"address\": {\n          \"socket_address\": {\n            \"address\": \"127.0.0.1\",\n            \"port_value\": 18443\n          }\n        },\n        \"filter_chains\": [\n          {\n            \"filters\": [\n              {\n                \"name\": \"envoy.filters.network.http_connection_manager\",\n                \"typed_config\": {\n                  \"@type\": \"type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager\",\n                  \"http_filters\": [\n                    {\n                      \"name\": \"envoy.filters.http.router\",\n                      \"typed_config\": {\n                        \"@type\": \"type.googleapis.com/envoy.extensions.filters.http.router.v3.Router\"\n                      }\n                    }\n                  ],\n                  \"request_timeout\": \"10s\",\n                  \"route_config\": {\n                    \"name\": \"outbound_backend\",\n                    \"virtual_hosts\": [\n                      {\n                        \"domains\": [\n                          \"*\"\n                        ],\n                        \"name\": \"outbound_backend\",\n                        \"routes\": [\n                          {\n                            \"match\": {\n                              \"prefix\": \"/\"\n                            },\n                            \"route\": {\n                              \"cluster\": \"outbound_backend\",\n                              \"timeout\": \"5s\"\n                            }\n                          }\n                        ]\n                      }\n                    ]\n                  },\n                  \"stat_prefix\": \"outbound_backend\"\n                }\n              }\n            ]\n          }\n        ],\n        \"name\": \"outbound_backend\"\n      }\n    ]\n  }\n}\n"
+      },
+      "kind": "ConfigMap",
+      "metadata": {
+        "name": "envoy-intruder",
+        "namespace": "demo"
+      }
+    },
+    {
+      "apiVersion": "apps/v1",
+      "kind": "Deployment",
+      "metadata": {
+        "labels": {
+          "app": "intruder"
+        },
+        "name": "intruder",
+        "namespace": "demo"
+      },
+      "spec": {
+        "replicas": 1,
+        "selector": {
+          "matchLabels": {
+            "app": "intruder"
+          }
+        },
+        "template": {
+          "metadata": {
+            "labels": {
+              "app": "intruder"
+            }
+          },
+          "spec": {
+            "automountServiceAccountToken": false,
+            "containers": [
+              {
+                "args": [
+                  "-c",
+                  "/etc/envoy/envoy.json",
+                  "--log-level",
+                  "info"
+                ],
+                "image": "docker.io/envoyproxy/envoy:v1.39.5@sha256:8fc594a5d85eb76dca24155cfb9208882406873932b20cf33649a0a611194c43",
+                "name": "envoy",
+                "ports": [],
+                "resources": {
+                  "limits": {
+                    "cpu": "500m",
+                    "memory": "128Mi"
+                  },
+                  "requests": {
+                    "cpu": "25m",
+                    "memory": "32Mi"
+                  }
+                },
+                "securityContext": {
+                  "allowPrivilegeEscalation": false,
+                  "capabilities": {
+                    "drop": [
+                      "ALL"
+                    ]
+                  },
+                  "readOnlyRootFilesystem": true,
+                  "runAsGroup": 101,
+                  "runAsNonRoot": true,
+                  "runAsUser": 101
+                },
+                "volumeMounts": [
+                  {
+                    "mountPath": "/etc/envoy",
+                    "name": "envoy",
+                    "readOnly": true
+                  },
+                  {
+                    "mountPath": "/run/spire/sockets",
+                    "name": "spire-sockets",
+                    "readOnly": true
+                  }
+                ]
+              },
+              {
+                "command": [
+                  "sleep",
+                  "infinity"
+                ],
+                "image": "docker.io/curlimages/curl:8.22.0@sha256:58adaa4e8dca9c988bae2aba4ab3434a0bb2da16bbe3f92dec39ec7785166777",
+                "name": "app",
+                "resources": {
+                  "limits": {
+                    "cpu": "100m",
+                    "memory": "64Mi"
+                  },
+                  "requests": {
+                    "cpu": "25m",
+                    "memory": "32Mi"
+                  }
+                },
+                "securityContext": {
+                  "allowPrivilegeEscalation": false,
+                  "capabilities": {
+                    "drop": [
+                      "ALL"
+                    ]
+                  },
+                  "readOnlyRootFilesystem": true,
+                  "runAsGroup": 100,
+                  "runAsNonRoot": true,
+                  "runAsUser": 100
+                }
+              }
+            ],
+            "securityContext": {
+              "runAsNonRoot": true,
+              "seccompProfile": {
+                "type": "RuntimeDefault"
+              }
+            },
+            "serviceAccountName": "intruder",
+            "volumes": [
+              {
+                "configMap": {
+                  "name": "envoy-intruder"
+                },
+                "name": "envoy"
+              },
+              {
+                "hostPath": {
+                  "path": "/run/spire/sockets",
+                  "type": "Directory"
+                },
+                "name": "spire-sockets"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "kind": "List"
+}

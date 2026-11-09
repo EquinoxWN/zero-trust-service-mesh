@@ -1,0 +1,81 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Least privilege: the workflow can read the code and nothing else.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # Every action is pinned to a full commit SHA.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - run: make ci
+      - name: Generated configs match the spec
+        run: ztmesh check
+      - name: Local mTLS demo (decision log as an annotation)
+        run: |
+          ztmesh demo --log decisions.jsonl | tee demo.txt
+          echo "::notice title=ztmesh demo::$(tail -n 1 demo.txt)"
+      - name: Known-vulnerability audit
+        run: make audit
+
+  # Envoy parses and validates every generated sidecar bootstrap.
+  envoy-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: envoy --mode validate
+        run: |
+          img=docker.io/envoyproxy/envoy:v1.39.5@sha256:8fc594a5d85eb76dca24155cfb9208882406873932b20cf33649a0a611194c43
+          for f in deploy/generated/envoy/*.json; do
+            timeout 120 docker run --rm --network none -v "$PWD/deploy/generated/envoy:/cfg:ro" "$img" \
+              --mode validate -c "/cfg/$(basename "$f")"
+          done
+          echo "::notice title=envoy validate::$(ls deploy/generated/envoy/*.json | wc -l) bootstraps valid"
+
+  # SPIRE + Envoy in a kind cluster: attestation, SVIDs and mutual TLS end to end.
+  kind-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install kind v0.33.0 (checksum verified)
+        run: |
+          curl -fsSLo kind https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-linux-amd64
+          echo "aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d  kind" | sha256sum -c -
+          sudo install -m 0755 kind /usr/local/bin/kind
+      - name: Create cluster
+        run: |
+          kind create cluster --name zt-demo --wait 180s \
+            --image kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
+      - name: End-to-end check
+        run: bash deploy/kind/e2e.sh
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          kubectl get pods -A -o wide || true
+          kubectl -n spire logs statefulset/spire-server --tail=60 || true
+          kubectl -n spire logs daemonset/spire-agent --tail=60 || true
+          for d in backend frontend intruder; do kubectl -n demo logs "deploy/$d" -c envoy --tail=40 || true; done
+          kubectl -n spire logs daemonset/spire-agent --tail=20 2>&1 | python3 -c "import sys; print('::error title=spire-agent (last lines)::' + sys.stdin.read().replace('%', '%25').replace('\r', '').replace('\n', '%0A'))"

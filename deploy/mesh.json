@@ -1,0 +1,28 @@
+{
+  "trust_domain": "mesh.example",
+  "cluster": "zt-demo",
+  "svid_ttl_seconds": 3600,
+  "workloads": [
+    {
+      "name": "backend",
+      "namespace": "demo",
+      "service_account": "backend",
+      "port": 8443,
+      "allowed_callers": ["frontend"]
+    },
+    {
+      "name": "frontend",
+      "namespace": "demo",
+      "service_account": "frontend",
+      "upstreams": ["backend"]
+    }
+  ],
+  "unregistered": [
+    {
+      "name": "intruder",
+      "namespace": "demo",
+      "service_account": "intruder",
+      "upstreams": ["backend"]
+    }
+  ]
+}

@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# End-to-end check in a kind cluster (CI only, ubuntu runner): SPIRE attests the workloads and
+# Envoy sidecars use the SVIDs for mutual TLS. Expects kind and kubectl on PATH and the configs
+# rendered in deploy/generated. Every wait is bounded.
+set -euo pipefail
+
+GEN=deploy/generated
+NS=demo
+FRONT=spiffe://mesh.example/ns/demo/sa/frontend
+BACK=spiffe://mesh.example/ns/demo/sa/backend
+
+fail() { echo "::error title=kind e2e::$*"; exit 1; }
+k() { timeout 60 kubectl "$@"; }
+
+echo "== SPIRE server and agent"
+k apply -f "$GEN/spire.json"
+timeout 330 kubectl -n spire rollout status statefulset/spire-server --timeout=300s
+timeout 330 kubectl -n spire rollout status daemonset/spire-agent --timeout=300s
+
+echo "== registration entries"
+bash "$GEN/register.sh"
+bash "$GEN/register.sh"   # a second run must succeed too (idempotent)
+
+echo "== workloads"
+k apply -f "$GEN/workloads.json"
+for d in backend frontend intruder; do
+  timeout 200 kubectl -n "$NS" rollout status "deployment/$d" --timeout=180s
+done
+
+curl_from() { # pod-deployment, then curl args; prints status code and headers
+  k -n "$NS" exec "deploy/$1" -c app -- curl -s -o /dev/null -D - --max-time 5 "${@:2}" || true
+}
+
+echo "== frontend -> backend through both sidecars (mTLS)"
+ok=""
+for _ in $(seq 1 40); do   # the SVID reaches Envoy within one agent sync (about 5 s)
+  out=$(curl_from frontend http://127.0.0.1:18443/)
+  if grep -q "^HTTP/1.1 200" <<<"$out"; then ok=1; break; fi
+  sleep 3
+done
+[ -n "$ok" ] || fail "frontend never reached backend: $out"
+peer=$(grep -i '^x-peer-spiffe-id:' <<<"$out" | tr -d '\r' | awk '{print $2}')
+[ "$peer" = "$FRONT" ] || fail "backend saw peer '$peer', want $FRONT"
+local_id=$(grep -i '^x-local-spiffe-id:' <<<"$out" | tr -d '\r' | awk '{print $2}')
+[ "$local_id" = "$BACK" ] || fail "backend presented '$local_id', want $BACK"
+echo "::notice title=mTLS allowed::frontend -> backend 200; backend saw $peer and presented $local_id"
+
+echo "== frontend SVID as loaded by Envoy"
+certs=$(k -n "$NS" exec deploy/frontend -c app -- curl -s --max-time 5 http://127.0.0.1:9901/certs)
+ttl=$(printf '%s' "$certs" | python3 -c '
+import datetime as dt, json, sys
+for c in json.load(sys.stdin)["certificates"]:
+    for cc in c.get("cert_chain", []):
+        if sys.argv[1] in [s.get("uri") for s in cc.get("subject_alt_names", [])]:
+            exp = dt.datetime.fromisoformat(cc["expiration_time"].replace("Z", "+00:00"))
+            print(int((exp - dt.datetime.now(dt.timezone.utc)).total_seconds()))
+            raise SystemExit
+raise SystemExit("frontend SVID not found in Envoy /certs")
+' "$FRONT")
+[ "$ttl" -gt 0 ] && [ "$ttl" -le 3600 ] || fail "frontend SVID lifetime left $ttl s, want (0, 3600]"
+echo "::notice title=Short-lived SVID::frontend SVID expires in ${ttl} s (at most 3600)"
+
+echo "== intruder (no registration entry) through its sidecar"
+for _ in 1 2 3 4 5; do
+  out=$(curl_from intruder http://127.0.0.1:18443/)
+  grep -q "^HTTP/1.1 200" <<<"$out" && fail "intruder without an SVID reached backend"
+  sleep 2
+done
+code=$(head -1 <<<"$out" | tr -d '\r')
+echo "::notice title=No identity refused::intruder sidecar has no SVID; 5 of 5 attempts refused (last: ${code:-connection failed})"
+
+echo "== intruder bypassing its sidecar: TLS without a client certificate"
+if k -n "$NS" exec deploy/intruder -c app -- curl -sk --max-time 5 -o /dev/null "https://backend.$NS.svc.cluster.local:8443/"; then
+  fail "backend accepted a TLS connection without a client certificate"
+fi
+echo "::notice title=No client certificate refused::backend refused TLS without a client certificate"
+
+echo "== intruder bypassing its sidecar: plain HTTP"
+if k -n "$NS" exec deploy/intruder -c app -- curl -s --max-time 5 -o /dev/null "http://backend.$NS.svc.cluster.local:8443/"; then
+  fail "backend answered plain HTTP"
+fi
+echo "::notice title=Plain text refused::backend refused plain HTTP on its mTLS port"
+echo "E2E PASS"

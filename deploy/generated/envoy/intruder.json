@@ -1,0 +1,187 @@
+{
+  "admin": {
+    "address": {
+      "socket_address": {
+        "address": "127.0.0.1",
+        "port_value": 9901
+      }
+    }
+  },
+  "node": {
+    "cluster": "intruder",
+    "id": "intruder"
+  },
+  "static_resources": {
+    "clusters": [
+      {
+        "connect_timeout": "1s",
+        "load_assignment": {
+          "cluster_name": "spire_agent",
+          "endpoints": [
+            {
+              "lb_endpoints": [
+                {
+                  "endpoint": {
+                    "address": {
+                      "pipe": {
+                        "path": "/run/spire/sockets/agent.sock"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "name": "spire_agent",
+        "type": "STATIC",
+        "typed_extension_protocol_options": {
+          "envoy.extensions.upstreams.http.v3.HttpProtocolOptions": {
+            "@type": "type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions",
+            "explicit_http_config": {
+              "http2_protocol_options": {}
+            }
+          }
+        }
+      },
+      {
+        "connect_timeout": "2s",
+        "load_assignment": {
+          "cluster_name": "outbound_backend",
+          "endpoints": [
+            {
+              "lb_endpoints": [
+                {
+                  "endpoint": {
+                    "address": {
+                      "socket_address": {
+                        "address": "backend.demo.svc.cluster.local",
+                        "port_value": 8443
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "name": "outbound_backend",
+        "transport_socket": {
+          "name": "envoy.transport_sockets.tls",
+          "typed_config": {
+            "@type": "type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext",
+            "common_tls_context": {
+              "combined_validation_context": {
+                "default_validation_context": {
+                  "match_typed_subject_alt_names": [
+                    {
+                      "matcher": {
+                        "exact": "spiffe://mesh.example/ns/demo/sa/backend"
+                      },
+                      "san_type": "URI"
+                    }
+                  ]
+                },
+                "validation_context_sds_secret_config": {
+                  "name": "spiffe://mesh.example",
+                  "sds_config": {
+                    "api_config_source": {
+                      "api_type": "GRPC",
+                      "grpc_services": [
+                        {
+                          "envoy_grpc": {
+                            "cluster_name": "spire_agent"
+                          }
+                        }
+                      ],
+                      "transport_api_version": "V3"
+                    },
+                    "resource_api_version": "V3"
+                  }
+                }
+              },
+              "tls_certificate_sds_secret_configs": [
+                {
+                  "name": "spiffe://mesh.example/ns/demo/sa/intruder",
+                  "sds_config": {
+                    "api_config_source": {
+                      "api_type": "GRPC",
+                      "grpc_services": [
+                        {
+                          "envoy_grpc": {
+                            "cluster_name": "spire_agent"
+                          }
+                        }
+                      ],
+                      "transport_api_version": "V3"
+                    },
+                    "resource_api_version": "V3"
+                  }
+                }
+              ],
+              "tls_params": {
+                "tls_minimum_protocol_version": "TLSv1_3"
+              }
+            }
+          }
+        },
+        "type": "STRICT_DNS"
+      }
+    ],
+    "listeners": [
+      {
+        "address": {
+          "socket_address": {
+            "address": "127.0.0.1",
+            "port_value": 18443
+          }
+        },
+        "filter_chains": [
+          {
+            "filters": [
+              {
+                "name": "envoy.filters.network.http_connection_manager",
+                "typed_config": {
+                  "@type": "type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager",
+                  "http_filters": [
+                    {
+                      "name": "envoy.filters.http.router",
+                      "typed_config": {
+                        "@type": "type.googleapis.com/envoy.extensions.filters.http.router.v3.Router"
+                      }
+                    }
+                  ],
+                  "request_timeout": "10s",
+                  "route_config": {
+                    "name": "outbound_backend",
+                    "virtual_hosts": [
+                      {
+                        "domains": [
+                          "*"
+                        ],
+                        "name": "outbound_backend",
+                        "routes": [
+                          {
+                            "match": {
+                              "prefix": "/"
+                            },
+                            "route": {
+                              "cluster": "outbound_backend",
+                              "timeout": "5s"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  "stat_prefix": "outbound_backend"
+                }
+              }
+            ]
+          }
+        ],
+        "name": "outbound_backend"
+      }
+    ]
+  }
+}
