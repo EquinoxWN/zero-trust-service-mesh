@@ -126,6 +126,15 @@ def test_every_tls_context_and_sds_points_at_the_spire_agent_socket() -> None:
                 )
 
 
+def test_every_tls_context_pins_tls13_at_both_ends() -> None:
+    # Envoy defaults the client maximum to TLSv1_2; min 1.3 alone gives an empty range upstream.
+    for w in SPEC.workloads:
+        text = json.dumps(bootstrap(SPEC, w))
+        n_ctx = text.count('"common_tls_context"')
+        assert text.count('"tls_minimum_protocol_version": "TLSv1_3"') == n_ctx
+        assert text.count('"tls_maximum_protocol_version": "TLSv1_3"') == n_ctx
+
+
 def test_tls_context_needs_a_peer() -> None:
     with pytest.raises(ValueError, match="allowed peer"):
         tls_context(SPEC, SPEC.get("backend"), [])

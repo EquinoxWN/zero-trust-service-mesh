@@ -9,8 +9,25 @@ NS=demo
 FRONT=spiffe://mesh.example/ns/demo/sa/frontend
 BACK=spiffe://mesh.example/ns/demo/sa/backend
 
-fail() { echo "::error title=kind e2e::$*"; exit 1; }
 k() { timeout 60 kubectl "$@"; }
+srv() { k -n spire exec spire-server-0 -c spire-server -- /opt/spire/bin/spire-server "$@"; }
+
+annotate() { # title, then text on stdin; one ::error annotation (job logs need a signed-in account)
+  python3 -c 'import sys; t=sys.stdin.read()[-3500:]; print("::error title=" + sys.argv[1] + "::" + t.replace("%", "%25").replace("\r", "").replace("\n", "%0A"))' "$1"
+}
+
+diagnose() { # registration entries, agent selectors, the 503 body and Envoy TLS/SDS log lines
+  { srv entry show 2>&1 | grep -E "Entry ID|SPIFFE ID|Parent ID|Selector|X509-SVID TTL" || true; } | annotate "debug: entry show"
+  { srv agent list 2>&1 || true
+    for id in $(srv agent list 2>/dev/null | awk '/SPIFFE ID/ {print $NF}'); do srv agent show -spiffeID "$id" 2>&1 || true; done
+  } | annotate "debug: agents and node selectors"
+  { k -n "$NS" exec deploy/frontend -c app -- curl -s --max-time 5 -D - http://127.0.0.1:18443/ 2>&1 || true; } | annotate "debug: frontend response"
+  for d in frontend backend; do
+    { k -n "$NS" logs "deploy/$d" -c envoy --tail=400 2>&1 | grep -iE "tls|ssl|sds|secret|warming|handshake|error" | tail -n 25 || true; } | annotate "debug: $d envoy"
+  done
+  { k -n spire logs daemonset/spire-agent --tail=400 2>&1 | grep -v 'sa/intruder\\"\]' | tail -n 25 || true; } | annotate "debug: spire-agent (intruder refusals left out)"
+}
+fail() { echo "::error title=kind e2e::$*"; diagnose || true; exit 1; }
 
 echo "== SPIRE server and agent"
 k apply -f "$GEN/spire.json"
@@ -20,6 +37,8 @@ timeout 330 kubectl -n spire rollout status daemonset/spire-agent --timeout=300s
 echo "== registration entries"
 bash "$GEN/register.sh"
 bash "$GEN/register.sh"   # a second run must succeed too (idempotent)
+
+echo "::notice title=registration entries::$(srv entry show 2>&1 | grep -E '^(SPIFFE ID|Selector)' | awk '{print $NF}' | paste -sd ' ' -)"
 
 echo "== workloads"
 k apply -f "$GEN/workloads.json"

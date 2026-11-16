@@ -16,13 +16,16 @@ list, and a server presenting the wrong identity):
 
 ![ztmesh demo: one allowed and five refused mTLS connections](docs/proof/demo.jpg)
 
-94 tests pass locally (1 POSIX-only test is skipped on Windows), the generated SPIRE, Envoy and Kubernetes files match the spec, and the
+95 tests pass locally (1 POSIX-only test is skipped on Windows), the generated SPIRE, Envoy and Kubernetes files match the spec, and the
 dependency audit is clean:
 
 ![pytest, ztmesh check and pip-audit output](docs/proof/tests.jpg)
 
 The same claims against real SPIRE 1.15.5 and Envoy v1.39.5 run in a kind cluster in CI
-(`kind-e2e` job); that job has not run yet because the repository is not pushed.
+(`kind-e2e` job). Its first run (run 43901407697) failed with HTTP 503 from the frontend
+sidecar: Envoy's upstream TLS context allowed TLS 1.3 at minimum but Envoy defaults a client's
+maximum to TLS 1.2, so no version was left to negotiate. Every generated TLS context now sets
+both ends to TLS 1.3 ([results](docs/results/m1.md#first-kind-run-2026-11-16)).
 
 ## Architecture
 
@@ -67,7 +70,7 @@ In M1 that means:
   `spiffe://mesh.example/ns/<namespace>/sa/<service account>`.
 - **Transport.** Envoy fetches its SVID and the trust bundle from the SPIRE agent over SDS. The
   backend's listener requires a client certificate and accepts only the IDs in `allowed_callers`;
-  the frontend's cluster accepts only the backend's ID. TLS 1.3 minimum. Apps talk plain HTTP
+  the frontend's cluster accepts only the backend's ID. TLS 1.3 only (minimum and maximum both set). Apps talk plain HTTP
   to their own sidecar on 127.0.0.1 only.
 - **Local model.** The same rules in Python: SPIRE's selector matching, a CA that issues SVIDs,
   X509-SVID verification (RFC 5280 path validation through `cryptography` plus the SPIFFE rules)
@@ -103,7 +106,7 @@ Language: **Python** (3.11+). Code in [`src/zero_trust_service_mesh/`](src/zero_
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 make setup     # install the package and dev tools
 make lint      # ruff, ruff format, mypy --strict
-make test      # 95 tests (94 run on Windows; 1 is POSIX-only)
+make test      # 96 tests (95 run on Windows; 1 is POSIX-only)
 make check     # generated configs match deploy/mesh.json
 make demo      # one allowed and five refused mTLS connections; decision log in .tmp/
 make audit     # pip-audit
@@ -131,17 +134,17 @@ and the mutation table are in [docs/quality/2026-11-01.md](docs/quality/2026-11-
 | `test_attestation.py` | 8 | SPIRE matching: only a registered namespace + service account under the right agent gets an ID |
 | `test_ca_verify.py` | 9 | 1 h SVIDs that never outlive the CA; expired, not-yet-valid, rogue-CA, foreign and malformed SVIDs rejected |
 | `test_mtls.py` | 5 | Real TLS 1.3 on 127.0.0.1: both IDs proven; no client certificate refused; all six demo scenarios as expected |
-| `test_render.py` | 15 | Client certificates required, Envoy admin only on a Unix socket the app container cannot see, exact SPIFFE ID matchers, SDS on the agent socket, images by digest, limits, no tokens, least-privilege RBAC, committed files current |
+| `test_render.py` | 16 | Client certificates required, TLS 1.3 at both ends of every TLS context, Envoy admin only on a Unix socket the app container cannot see, exact SPIFFE ID matchers, SDS on the agent socket, images by digest, limits, no tokens, least-privilege RBAC, committed files current |
 | `test_cli.py` | 7 | Exit codes, decision log (12 JSON records, UTC), atomic writes with unpredictable temp names (no planted file or symlink is reused) and the requested mode |
 | `test_smoke.py` | 1 | Package version |
 
 | Check | Result |
 |---|---|
-| Tests (`make test`) | **94 passed**, 0 failed, 1 skipped on Windows (POSIX symlink and mode test, runs in CI) |
+| Tests (`make test`) | **95 passed**, 0 failed, 1 skipped on Windows (POSIX symlink and mode test, runs in CI) |
 | Demo | 6 of 6 scenarios as expected: 1 allowed, 5 refused |
-| Mutation testing | 14 of 14 hand mutations killed |
+| Mutation testing | 15 of 15 hand mutations killed |
 | Lint / types / audit | ruff and mypy `--strict` clean; `pip-audit`: no known vulnerabilities |
-| CI only (not run yet) | `envoy --mode validate` of the 3 bootstraps; kind e2e with real SPIRE and Envoy |
+| CI (run 43901407697) | `build` and `envoy --mode validate` of the 3 bootstraps passed; kind e2e failed (TLS version range, fixed since) |
 
 ## Roadmap
 

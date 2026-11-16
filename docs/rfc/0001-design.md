@@ -66,7 +66,7 @@ deploy/mesh.json --ztmesh render--> deploy/generated/
 - **Transport.** Each workload's Envoy fetches its SVID (secret named by its SPIFFE ID) and the
   bundle (`spiffe://<td>`) from the SPIRE agent's SDS API on `/run/spire/sockets/agent.sock`.
   Inbound listeners require a client certificate and accept only the SPIFFE IDs listed in
-  `allowed_callers`; outbound clusters accept only the upstream's SPIFFE ID. TLS 1.3 minimum.
+  `allowed_callers`; outbound clusters accept only the upstream's SPIFFE ID. TLS 1.3 only (minimum and maximum both set).
   The app talks plain HTTP to its sidecar on 127.0.0.1 only. Envoy's admin API is not on the pod
   network: it listens on a Unix socket in a volume that only the envoy container mounts.
 - **Local reference model.** `attestation.py` reproduces SPIRE's matching rule (all entry
@@ -101,8 +101,8 @@ deploy/mesh.json --ztmesh render--> deploy/generated/
 
 ## Risks and open questions
 
-- The kind job has not run yet (the repository is not pushed); manifests could need fixes on the
-  first CI run (agent permissions, bundle ConfigMap timing).
+- The first kind run failed on Envoy's default client TLS maximum (1.2) against a 1.3 minimum;
+  both ends are now set. Results of later runs are in `docs/results/m1.md`.
 - The hostPath socket gives every pod on a node access to the Workload API; attestation still
   decides which identity it gets, but the CSI driver narrows this (ADR 0003).
 - The local model mirrors SPIRE's rules; it is not SPIRE. The kind job is the check that the

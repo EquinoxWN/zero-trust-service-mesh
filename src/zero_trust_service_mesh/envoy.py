@@ -34,7 +34,11 @@ def tls_context(spec: MeshSpec, w: Workload, peers: list[str]) -> dict[str, Any]
         raise ValueError(f"{w.name}: a TLS context needs at least one allowed peer")
     td_id = f"spiffe://{spec.trust_domain}"
     return {
-        "tls_params": {"tls_minimum_protocol_version": "TLSv1_3"},
+        # Envoy's client default maximum is TLSv1_2, so a 1.3-only range must set both ends.
+        "tls_params": {
+            "tls_minimum_protocol_version": "TLSv1_3",
+            "tls_maximum_protocol_version": "TLSv1_3",
+        },
         "tls_certificate_sds_secret_configs": [_sds(str(w.spiffe_id(spec.trust_domain)))],
         "combined_validation_context": {
             "default_validation_context": {
