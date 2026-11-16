@@ -102,7 +102,7 @@ deploy/mesh.json --ztmesh render--> deploy/generated/
 ## Risks and open questions
 
 - The first kind run failed on Envoy's default client TLS maximum (1.2) against a 1.3 minimum;
-  both ends are now set. Results of later runs are in `docs/results/m1.md`.
+  both ends are now set and run 43904492171 passed (`docs/results/m1.md`).
 - The hostPath socket gives every pod on a node access to the Workload API; attestation still
   decides which identity it gets, but the CSI driver narrows this (ADR 0003).
 - The local model mirrors SPIRE's rules; it is not SPIRE. The kind job is the check that the

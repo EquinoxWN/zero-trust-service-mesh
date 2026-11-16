@@ -25,7 +25,8 @@ The same claims against real SPIRE 1.15.5 and Envoy v1.39.5 run in a kind cluste
 (`kind-e2e` job). Its first run (run 43901407697) failed with HTTP 503 from the frontend
 sidecar: Envoy's upstream TLS context allowed TLS 1.3 at minimum but Envoy defaults a client's
 maximum to TLS 1.2, so no version was left to negotiate. Every generated TLS context now sets
-both ends to TLS 1.3 ([results](docs/results/m1.md#first-kind-run-2026-11-16)).
+both ends to TLS 1.3, and run 43904492171 passed all three jobs
+([results](docs/results/m1.md#first-kind-run-2026-11-16)).
 
 ## Architecture
 
@@ -144,7 +145,7 @@ and the mutation table are in [docs/quality/2026-11-01.md](docs/quality/2026-11-
 | Demo | 6 of 6 scenarios as expected: 1 allowed, 5 refused |
 | Mutation testing | 15 of 15 hand mutations killed |
 | Lint / types / audit | ruff and mypy `--strict` clean; `pip-audit`: no known vulnerabilities |
-| CI (run 43901407697) | `build` and `envoy --mode validate` of the 3 bootstraps passed; kind e2e failed (TLS version range, fixed since) |
+| CI (run 43904492171) | `build`, `envoy --mode validate` (3 bootstraps valid) and kind e2e (all 6 cluster checks) passed; the earlier run 43901407697 failed on the TLS version range |
 
 ## Roadmap
 
