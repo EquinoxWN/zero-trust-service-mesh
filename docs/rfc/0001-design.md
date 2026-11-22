@@ -80,7 +80,7 @@ deploy/mesh.json --ztmesh render--> deploy/generated/
 | Option | Why not (for M1) |
 |---|---|
 | Istio or Linkerd with their built-in CA | Fast to switch on, but identity issuance and Envoy config are hidden behind the control plane; the project's point is to show and test each piece. SPIRE is also what both can plug into. |
-| SPIRE Controller Manager + SPIFFE CSI driver (official Helm chart) | The production-grade path (no hostPath, automatic entries). It adds CRDs, a webhook and a chart version to track; M1 uses raw manifests and explicit `entry create` so every object is visible. Recorded in ADR 0003 as the planned upgrade. |
+| SPIRE Controller Manager + SPIFFE CSI driver (official Helm chart) | The usual upstream path (no hostPath, automatic entries). It adds CRDs, a webhook and a chart version to track; M1 uses raw manifests and explicit `entry create` so every object is visible. Recorded in ADR 0003 as the planned upgrade. |
 | Kubernetes NetworkPolicy only | Restricts by IP and label, not by proven identity; it cannot tell a compromised pod from a healthy one with the same labels and does not encrypt. |
 | Application-level mTLS with go-spiffe/py-spiffe | Strong, but every service must change; sidecars give the same guarantee without app changes. |
 
